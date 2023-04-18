@@ -15,9 +15,22 @@ def make_beta_schedule(schedule='linear', n_timesteps=1000, start=1e-5, end=1e-2
     return betas
 
 def extract(input, t, x):
+    #get the shape of x input
     shape = x.shape
+    #take the input, gather the value along the first dimension using t as index
+    #i.e. us t as the first index to modify the access input
     out = torch.gather(input, 0, t.to(input.device))
+    #recreate a new dimension; with first dimension the same as the first dimension as t
+    #the remaining dimension has size of 1
+    #total number of dimension should be the same as x
     reshape = [t.shape[0]] + [1] * (len(shape) - 1)
+
+    #suppose x has dimension n1 * n2 * ... * nn
+    #suppose t has the same dimension m1 * m2 * .. mm, and input has a dimension greater than it
+    #out also has the same dimension as t, but with values modified according to t index
+    #reshape then has dimension m1 * 1 * 1 * 1...1, with n-1 ones
+    #out is reshaped to the shape of reshape
+    #suggesting the t, input size must be the same as the reshape, i.e. m1
     return out.reshape(*reshape)
 
 def q_posterior_mean_variance(x_0, x_t, t,posterior_mean_coef_1,posterior_mean_coef_2,posterior_log_variance_clipped):
@@ -53,6 +66,7 @@ def p_sample(model, x, t,alphas,betas,one_minus_alphas_bar_sqrt):
 def p_sample_loop(model, shape,n_steps,alphas,betas,one_minus_alphas_bar_sqrt):
     cur_x = torch.randn(shape)
     x_seq = [cur_x]
+    #reverse generating the p_sample in n_steps, so first p_sample(100...)...p_sample(0)
     for i in reversed(range(n_steps)):
         cur_x = p_sample(model, cur_x, i,alphas,betas,one_minus_alphas_bar_sqrt)
         x_seq.append(cur_x)
@@ -111,13 +125,17 @@ def noise_estimation_loss(model, x_0,alphas_bar_sqrt,one_minus_alphas_bar_sqrt,n
     batch_size = x_0.shape[0]
     # Select a random step for each example
     t = torch.randint(0, n_steps, size=(batch_size // 2 + 1,))
+    #concatenate the t (batch_siz//2+1 random step integers), n_steps-t-1 (the opposite of the t) together
+    #and take almost all of the t inside
     t = torch.cat([t, n_steps - t - 1], dim=0)[:batch_size].long()
     # x0 multiplier
     a = extract(alphas_bar_sqrt, t, x_0)
     # eps multiplier
     am1 = extract(one_minus_alphas_bar_sqrt, t, x_0)
     e = torch.randn_like(x_0)
-    # model input
+    # model input (forward process)
     x = x_0 * a + e * am1
+    # model output (reverse process)
     output = model(x, t)
+    # return the difference between complete noise and reversed output squared and meaned corresponding to L_simple equation
     return (e - output).square().mean()
